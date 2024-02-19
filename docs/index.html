@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Participatory Mapping Project: Seattle's Parks</title>
+    <script src="https://unpkg.com/maplibre-gl@3.1.0/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@3.1.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <!-- Styles for the map and popup -->
+    <style>
+        /* Basic CSS for the page */
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        #info {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 350px;
+            margin: 10px;
+            padding: 10px;
+            background-color: #ffffff;
+            border-radius: 5px;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #000000;
+            z-index: 1;
+        }
+
+        #popup {
+            padding: 10px;
+        }
+
+        #name #email {
+            width: 100%;
+            height: 20px;
+            margin-bottom: 10px;
+        }
+
+        #content {
+            width: 100%;
+            height: 45px;
+            margin-bottom: 10px;
+        }
+
+        #submit {
+            float: right;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Map container -->
+    <div id="map"></div>
+
+    <!-- Information box -->
+    <div id="info">
+        <h3>Participatory Mapping Project: Seattle's Parks</h3>
+        <h4>Yanyi Li | University of Washington </h4>
+        <!-- Introduction to the participatory mapping solution -->
+        <p>
+            This map shows all known Seattle public parks.
+            Users can contribute their local knowledge by clicking on the map,
+            submitting their information, and viewing it represented as a green marked.
+            Existing contributions can also be viewed as green mark.
+            <i>Last update: Feb 19, 2024</i>
+        </p>
+    </div>
+
+    <!-- JavaScript code for the interactive map and data submission -->
+    <script>
+        // Variable to hold the popup instance
+        let popup = null;
+
+        // GeoJSON object to hold the contributed data
+        let geojson = {
+            'type': 'FeatureCollection',
+            'features': []
+        };
+
+        // Create a new map instance
+        let map = new maplibregl.Map({
+            container: 'map', // container id
+            style: 'https://api.maptiler.com/maps/dataviz-dark/style.json?key=Cusoe5zmfmn26glFoeoe', // style URL
+            center: [-122.3321, 47.6062], // starting position [lng, lat]
+            zoom: 10.5 // starting zoom
+        });
+
+        map.loadImage('./assets/park.png', function (error, image) {
+            if (error) throw error;
+            map.addImage('park_icon', image);
+        });
+
+        map.loadImage('./assets/green_mark.png', function (error, image) {
+            if (error) throw error;
+            map.addImage('green_mark', image);
+        });
+
+
+        // Fetch existing records when the window is loaded
+        window.addEventListener("load", async function () {
+            let response = await fetch('http://geog458-lab05.hutao.lawrence.moe/api/get-record', {
+                method: 'GET'
+            });
+
+            let data = await response.json();
+
+            // Iterate through the fetched records and add them to the GeoJSON data object
+            for (const element of data.rows) {
+                geojson.features.push({
+                    'type': 'Feature',
+                    'properties': {
+                        'contributor': element.contributor,
+                        'email': element.email,
+                        'content': element.content,
+                    },
+                    'geometry': {
+                        'type': 'Point',
+                        'coordinates': [element.lng, element.lat]
+                    }
+                });
+            }
+        });
+
+
+
+        // After the map loads, add the GeoJSON source and layer for existing points
+        map.on("load", function () {
+            fetch('./assets/Park_Boundaries.geojson')
+                .then(response => response.json())
+                .then(data => {
+                    map.addSource('parks', {
+                        'type': 'geojson',
+                        'data': data
+                    });
+
+                    map.addLayer({
+                        'id': 'parksLayer',
+                        'type': 'symbol',
+                        'source': 'parks',
+                        'layout': {
+                            'icon-image': 'park_icon',
+                            'icon-size': 0.05
+                        },
+                    });
+
+                    map.addSource('user_places', {
+                        'type': 'geojson',
+                        'data': geojson
+                    });
+
+                    map.addLayer({
+                        'id': 'placesLayer',
+                        'type': 'symbol',
+                        'source': 'user_places',
+                        'layout': {
+                            'icon-image': 'green_mark',
+                            'icon-size': 0.02
+                        }
+                    });
+                });
+        });
+
+        // Show popup on mouse enter over an existing point
+        map.on('mouseenter', 'placesLayer', function (e) {
+            map.getCanvas().style.cursor = 'pointer';
+
+            var coordinates = e.features[0].geometry.coordinates;
+            var content = e.features[0].properties.content;
+            var contributor = e.features[0].properties.contributor;
+            var email = e.features[0].properties.email;
+
+            popup = new maplibregl.Popup()
+                .setLngLat(coordinates)
+                .setHTML("<p><b>" + contributor + " (" + email + ")</b> <i>said:</i> " + content + "</p>")
+                .addTo(map);
+        });
+
+        // Remove popup on mouse leave from an existing point
+        map.on('mouseleave', 'placesLayer', function () {
+            map.getCanvas().style.cursor = '';
+            popup.remove();
+        });
+
+        // Handle click event on the map to allow user contribution
+        map.on('click', function (e) {
+            if (popup) {
+                popup.remove();
+            }
+
+            // Create the HTML content for the contribution popup
+            const popupContent = '<div id="popup"><input type="text" id="name" placeholder="Input your name here..."><input type="text" id="email" placeholder="Input your email here..."><input type="text" id="content" placeholder="Input your message here..."><button id="submit">submit</button></div>';
+
+            // Create a new popup and set its content
+            popup = new maplibregl.Popup({ closeOnClick: false })
+                .setLngLat(e.lngLat)
+                .setHTML(popupContent)
+                .addTo(map);
+
+            // Attach an event listener to the submit button to handle new record submission
+            document.getElementById('submit').addEventListener('click', submitNewRecord);
+            e.preventDefault();
+        });
+
+        // Function to handle the submission of a new record
+        async function submitNewRecord() {
+            let contributor = document.getElementById('name').value;
+            let content = document.getElementById('content').value;
+            let email = document.getElementById('email').value;
+            let lngLat = popup.getLngLat();
+
+            // Create a new URLSearchParams object and append the data to it
+            let newRecord = new URLSearchParams();
+            newRecord.append('contributor', contributor);
+            newRecord.append('content', content);
+            newRecord.append('email', email);
+            newRecord.append('lng', lngLat.lng);
+            newRecord.append('lat', lngLat.lat);
+
+            // Set the POST request settings
+            let settings = {
+                method: 'POST',
+                body: newRecord
+            }
+
+            try {
+                // Send the POST request to add the new record
+                await fetch('http://geog458-lab05.hutao.lawrence.moe/api/add-record', settings);
+            } catch (err) {
+                // Handle any errors that occur during the request
+                console.error(err);
+            } finally {
+                // Remove the popup and update the GeoJSON data with the new point
+                popup.remove();
+                geojson.features.push({
+                    'type': 'Feature',
+                    'properties': {
+                        'contributor': contributor,
+                        'content': content,
+                        'email': email
+                    },
+                    'geometry': {
+                        'type': 'Point',
+                        'coordinates': [lngLat.lng, lngLat.lat]
+                    }
+                });
+                map.getSource('user_places').setData(geojson);
+            }
+        }
+    </script>
+
+</body>
+
+</html>
